@@ -1,0 +1,99 @@
+services:
+  nginx-proxy:
+    image: nginxproxy/nginx-proxy:latest
+    container_name: nginx-proxy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/tmp/docker.sock:ro
+      - certs:/etc/nginx/certs:ro
+      - vhost:/etc/nginx/vhost.d
+      - html:/usr/share/nginx/html
+    labels:
+      - "com.github.jrcs.letsencrypt_nginx_proxy_companion.nginx_proxy"
+    restart: unless-stopped
+
+  acme-companion:
+    image: nginxproxy/acme-companion:latest
+    container_name: nginx-proxy-acme
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - certs:/etc/nginx/certs:rw
+      - vhost:/etc/nginx/vhost.d:rw
+      - html:/usr/share/nginx/html:rw
+      - acme:/etc/acme.sh
+    environment:
+      - DEFAULT_EMAIL=artemij.karandashov@yandex.ru
+    depends_on:
+      - nginx-proxy
+    restart: unless-stopped
+  
+  client:
+    build:
+      context: ./client
+    container_name: client
+    expose:
+      - "80"
+    environment:
+      - VIRTUAL_HOST=mes-db.knuckles.us
+      - LETSENCRYPT_HOST=mes-db.knuckles.us
+    restart: always
+
+  server:
+    build: ./server
+    container_name: server
+    environment:
+      - DB_URL=postgresql+asyncpg://postgres:root@postgres:5433/mes_db
+      - REDIS_HOST=redis
+      - REDIS_PORT=6677
+      - JWT_SECRET=8bc977123c091886cb8ba87c591c97de
+      - JWT_ALGORITHM=HS256
+      - SERVER_PORT=8000
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    depends_on:
+      - db
+      - redis
+    networks:
+      - app-network
+
+  db:
+    image: postgres:16-alpine
+    container_name: postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: root
+      POSTGRES_DB: mes_db
+    ports:
+      - "5433:5433"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - app-network
+    command: -p 5433
+
+  redis:
+    build: ./redis
+    container_name: redis
+    command: redis-server /usr/local/etc/redis/redis.conf
+    volumes:
+      - ./redis/redis.conf:/usr/local/etc/redis/redis.conf
+    ports:
+      - "6677:6677"
+    networks:
+      - app-network
+
+volumes:
+  pgdata:
+  redis_data:
+  certs:
+  vhost:
+  html:
+  acme:
+
+networks:
+  app-network:
+    driver: bridge
